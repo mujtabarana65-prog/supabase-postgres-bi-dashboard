@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Flourish — ERP Intelligence</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<style>
+/* ---------------------------------------------------------------------
+   TOKENS — deep grain-silo charcoal + wheat gold. Deliberately not the
+   cream/terracotta or pure-dark/acid-green defaults.
+--------------------------------------------------------------------- */
+:root{
+  --bg:#12181a; --panel:#1a2124; --panel-2:#212a2d; --border:#2c363a;
+  --gold:#d4a72c; --gold-dim:#8a6d1e;
+  --green:#4caf82; --red:#e2574c; --amber:#e0a83f; --blue:#5b9bd5;
+  --text:#eef1f0; --text-dim:#9aa7a9; --text-faint:#657376;
+  --radius:14px;
+  --font-display:'Sora',ui-sans-serif,system-ui,sans-serif;
+  --font-body:'Inter',ui-sans-serif,system-ui,sans-serif;
+}
+@import url('https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap');
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:var(--font-body);background:var(--bg);color:var(--text);min-height:100vh}
+::selection{background:var(--gold);color:#12181a}
+
+/* setup banner shown until Supabase creds are filled in */
+#setup{display:none;max-width:760px;margin:48px auto;background:var(--panel);border:1px solid var(--gold-dim);border-radius:var(--radius);padding:28px 32px}
+#setup h2{font-family:var(--font-display);color:var(--gold);margin-bottom:12px;font-size:19px}
+#setup p{color:var(--text-dim);line-height:1.6;margin-bottom:10px;font-size:14px}
+#setup code{background:#0e1314;border:1px solid var(--border);padding:2px 6px;border-radius:5px;color:var(--amber);font-size:13px}
+#setup ol{color:var(--text-dim);padding-left:20px;line-height:1.8;font-size:14px}
+
+header{background:linear-gradient(120deg,#161d1f,#1c2528);border-bottom:1px solid var(--border);padding:18px 32px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px}
+.brand{display:flex;align-items:center;gap:12px}
+.brand .mark{width:38px;height:38px;border-radius:9px;background:linear-gradient(135deg,var(--gold),#a67c1f);display:flex;align-items:center;justify-content:center;font-size:18px}
+.brand h1{font-family:var(--font-display);font-size:18px;font-weight:600;letter-spacing:.2px}
+.brand .sub{font-size:12px;color:var(--text-faint);margin-top:1px}
+.hdr-right{display:flex;align-items:center;gap:14px}
+.status-pill{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--text-dim);background:var(--panel);border:1px solid var(--border);padding:6px 12px;border-radius:20px}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--text-faint)}
+.dot.live{background:var(--green);box-shadow:0 0 0 3px rgba(76,175,130,.15)}
+.dot.stale{background:var(--amber)}
+.dot.down{background:var(--red)}
+#refreshBtn{background:var(--gold);color:#1a1400;border:none;padding:9px 16px;border-radius:9px;font-size:13px;font-weight:600;cursor:pointer;font-family:var(--font-body)}
+#refreshBtn:disabled{opacity:.55;cursor:wait}
+#refreshBtn:hover:not(:disabled){background:#e3b93c}
+
+nav.tabs{display:flex;gap:2px;background:var(--panel);padding:0 32px;overflow-x:auto;border-bottom:1px solid var(--border)}
+nav.tabs button{padding:13px 18px;border:none;background:transparent;color:var(--text-dim);font-size:13.5px;font-weight:500;cursor:pointer;border-bottom:2px solid transparent;white-space:nowrap;font-family:var(--font-body)}
+nav.tabs button.on{color:var(--gold);border-bottom-color:var(--gold)}
+nav.tabs button:hover{color:var(--text)}
+
+main{padding:26px 32px 60px;max-width:1360px;margin:0 auto}
+.page{display:none}.page.on{display:block}
+
+.kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px;margin-bottom:20px}
+.kpi{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:18px 18px 14px;cursor:pointer;transition:border-color .15s,transform .12s}
+.kpi:hover{transform:translateY(-2px);border-color:var(--gold-dim)}
+.kpi.sel{border-color:var(--gold);background:var(--panel-2)}
+.kpi .lbl{font-size:11px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.6px;margin-bottom:8px}
+.kpi .val{font-family:var(--font-display);font-size:22px;font-weight:600}
+.kpi .sub{font-size:12px;color:var(--text-dim);margin-top:6px}
+.kpi .hint{font-size:10.5px;color:var(--gold);margin-top:8px;opacity:.75}
+
+.drill{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:20px;min-height:320px}
+.drill h3{font-family:var(--font-display);font-size:14px;font-weight:600;color:var(--text);margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid var(--border)}
+.cw{position:relative;width:100%;height:320px}
+.insight{font-size:12.5px;color:var(--text-dim);margin-top:14px;padding:10px 12px;background:#0e1314;border-radius:8px;border-left:3px solid var(--gold);line-height:1.55}
+.loading,.err{color:var(--text-faint);font-size:13px;padding:40px 0;text-align:center}
+.err{color:var(--red)}
+table.dt{width:100%;border-collapse:collapse;font-size:13px}
+table.dt th{text-align:left;color:var(--text-faint);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:.4px;padding:8px 10px;border-bottom:1px solid var(--border)}
+table.dt td{padding:9px 10px;border-bottom:1px solid #232c2f}
+table.dt tr:hover td{background:#1e2729}
+footer{text-align:center;color:var(--text-faint);font-size:11.5px;padding:20px;border-top:1px solid var(--border)}
+@media(max-width:768px){main{padding:16px}header{padding:14px 16px}nav.tabs{padding:0 16px}}
+</style>
+</head>
+<body>
+
+<div id="setup">
+  <h2>⚠ Connect your Supabase project</h2>
+  <p>This dashboard reads live data through Supabase's REST API. It won't show numbers until you point it at your project.</p>
+  <ol>
+    <li>In this file, find the <code>CONFIG</code> block near the bottom of the <code>&lt;script&gt;</code> and set <code>SUPABASE_URL</code> and <code>SUPABASE_ANON_KEY</code> (Supabase dashboard → Project Settings → API).</li>
+    <li>Run <code>bi_views_for_dashboard.sql</code> once in the Supabase SQL Editor — it creates the <code>public.v_*</code> views this file fetches, plus the HR views your proposal needs, and grants <code>SELECT</code> to the <code>anon</code> role.</li>
+    <li>Save this file and reopen it in your browser.</li>
+  </ol>
+  <p style="margin-top:14px">Using the anon key here is expected for Supabase's client-side model, but it makes these views world-readable to anyone with the file. Fine for an FYP demo; for anything real, put these views behind RLS or Supabase Auth first.</p>
+</div>
+
+<div id="app" style="display:none">
+<header>
+  <div class="brand">
+    <div class="mark">🌾</div>
+    <div><h1>Flourish ERP Intelligence</h1><div class="sub">Live analytics · Sales · Finance · Purchasing · Pricing · Inventory · Collections</div></div>
+  </div>
+  <div class="hdr-right">
+    <div class="status-pill"><span class="dot" id="statusDot"></span><span id="statusText">Connecting…</span></div>
+    <button id="refreshBtn" onclick="doRefresh()">↻ Refresh data</button>
+  </div>
+</header>
+
+<nav class="tabs" id="tabs">
+  <button class="tab on" data-tab="sales">Sales</button>
+  <button class="tab" data-tab="finance">Finance</button>
+  <button class="tab" data-tab="purchasing">Purchasing</button>
+  <button class="tab" data-tab="pricing">Pricing model</button>
+  <button class="tab" data-tab="inventory">Inventory</button>
+  <button class="tab" data-tab="collections">Collections</button>
+
+</nav>
+
+<main>
+  <div class="page on" id="pg-sales">
+    <div class="kpi-grid" id="kpi-sales"></div>
+    <div class="drill" id="drill-sales"></div>
+  </div>
+  <div class="page" id="pg-finance">
+    <div class="kpi-grid" id="kpi-finance"></div>
+    <div class="drill" id="drill-finance"></div>
+  </div>
+  <div class="page" id="pg-purchasing">
+    <div class="kpi-grid" id="kpi-purchasing"></div>
+    <div class="drill" id="drill-purchasing"></div>
+  </div>
+  <div class="page" id="pg-pricing">
+    <div class="kpi-grid" id="kpi-pricing"></div>
+    <div class="drill" id="drill-pricing"></div>
+  </div>
+  <div class="page" id="pg-inventory">
+    <div class="kpi-grid" id="kpi-inventory"></div>
+    <div class="drill" id="drill-inventory"></div>
+  </div>
+  <div class="page" id="pg-collections">
+    <div class="kpi-grid" id="kpi-collections"></div>
+    <div class="drill" id="drill-collections"></div>
+  </div>
+
+</main>
+
+<footer id="foot">Flourish ERP Intelligence · data via Supabase</footer>
+</div>
+
+<script>
+// ============================================================================
+// CONFIG — fill these in, then reload this file in your browser.
+// ============================================================================
+const SUPABASE_URL      = 'YOUR_SUPABASE_URL';       // e.g. https://xxxxx.supabase.co
+const SUPABASE_ANON_KEY = 'YOUR_SUPABASE_ANON_KEY';  // Project Settings → API → anon public key
+// ============================================================================
+
+const isConfigured = !SUPABASE_URL.includes('YOUR_') && !SUPABASE_ANON_KEY.includes('YOUR_');
+if(!isConfigured){
+  document.getElementById('setup').style.display='block';
+} else {
+  document.getElementById('app').style.display='block';
+}
+
+const sb = isConfigured ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
+
+const PKR = n => n==null ? '—' : 'PKR ' + (Math.abs(n) >= 1e6 ? (n/1e6).toFixed(1)+'M' : Math.abs(n)>=1e3 ? (n/1e3).toFixed(0)+'K' : n.toLocaleString());
+const NUM = n => n==null ? '—' : Number(n).toLocaleString();
+const PALETTE = ['#d4a72c','#5b9bd5','#4caf82','#e2574c','#e0a83f','#9b7fd0','#5ec9c9','#c96f9e'];
+
+async function fetchView(name){
+  const {data, error} = await sb.from(name).select('*');
+  if(error) throw error;
+  return data;
+}
+
+let charts = {}; // module -> Chart.js instance in the drill panel
+function drawChart(canvasId, type, labels, datasets, opts={}){
+  if(charts[canvasId]) charts[canvasId].destroy();
+  const ctx = document.getElementById(canvasId).getContext('2d');
+  charts[canvasId] = new Chart(ctx, {
+    type, data:{labels, datasets},
+    options:Object.assign({
+      responsive:true, maintainAspectRatio:false,
+      plugins:{legend:{labels:{color:'#9aa7a9', font:{size:11}}}},
+      scales: type==='doughnut' ? {} : {
+        x:{ticks:{color:'#9aa7a9',font:{size:11}}, grid:{color:'#232c2f'}},
+        y:{ticks:{color:'#9aa7a9',font:{size:11}}, grid:{color:'#232c2f'}}
+      }
+    }, opts)
+  });
+}
+
+function kpiCard(label, val, sub, hint, selected){
+  return `<div class="kpi ${selected?'sel':''}"><div class="lbl">${label}</div><div class="val">${val}</div><div class="sub">${sub}</div><div class="hint">${hint}</div></div>`;
+}
+
+// ---------------------------------------------------------------------------
+// SALES
+// ---------------------------------------------------------------------------
+async function loadSales(){
+  const grid = document.getElementById('kpi-sales');
+  const [kpi] = await fetchView('v_sales_kpi');
+  const monthly = await fetchView('v_sales_monthly');
+  const topCust = await fetchView('v_sales_top_customers');
+  const terms = await fetchView('v_sales_payment_terms');
+  const delivery = await fetchView('v_sales_delivery_status');
+
+  const cards = [
+    ['Total sales', PKR(kpi.total_sales_pkr), kpi.total_invoices+' invoices', 'Click → monthly trend', ()=>drillSalesTrend(monthly)],
+    ['Active customers', NUM(kpi.unique_customers), 'unique buyers', 'Click → top customers', ()=>drillSalesCustomers(topCust)],
+    ['Avg invoice value', PKR(kpi.avg_sale_amount), 'per transaction', 'Click → payment terms mix', ()=>drillSalesTerms(terms)],
+    ['Net sales', PKR(kpi.total_net_sales), 'after tax · '+PKR(kpi.total_tax_collected)+' tax', 'Click → delivery status', ()=>drillSalesDelivery(delivery)],
+  ];
+  grid.innerHTML = cards.map((c,i)=>kpiCard(c[0],c[1],c[2],c[3],i===0)).join('');
+  [...grid.children].forEach((el,i)=>el.onclick=()=>{[...grid.children].forEach(e=>e.classList.remove('sel'));el.classList.add('sel');cards[i][4]();});
+  drillSalesTrend(monthly);
+}
+function drillSalesTrend(rows){
+  document.getElementById('drill-sales').innerHTML = `<h3>Monthly sales trend</h3><div class="cw"><canvas id="c-sales"></canvas></div><div class="insight" id="i-sales"></div>`;
+  drawChart('c-sales','line', rows.map(r=>r.month.slice(0,7)), [{label:'Sales (PKR)', data:rows.map(r=>r.total_sales), borderColor:'#d4a72c', backgroundColor:'rgba(212,167,44,.12)', fill:true, tension:.3}]);
+  const peak = rows.reduce((a,b)=>b.total_sales>a.total_sales?b:a, rows[0]);
+  document.getElementById('i-sales').textContent = peak ? `Peak month: ${peak.month.slice(0,7)} at ${PKR(peak.total_sales)} across ${peak.invoices} invoices.` : '';
+}
+function drillSalesCustomers(rows){
+  document.getElementById('drill-sales').innerHTML = `<h3>Top 10 customers by sales</h3><div class="cw"><canvas id="c-sales"></canvas></div><div class="insight" id="i-sales"></div>`;
+  drawChart('c-sales','bar', rows.map(r=>r.customer), [{label:'Total sales', data:rows.map(r=>r.total_sales), backgroundColor:'#5b9bd5'}], {indexAxis:'y'});
+  const top3 = rows.slice(0,3).reduce((s,r)=>s+Number(r.total_sales),0);
+  const total = rows.reduce((s,r)=>s+Number(r.total_sales),0);
+  document.getElementById('i-sales').textContent = `Top 3 customers make up ${((top3/total)*100).toFixed(0)}% of the top-10 total — concentration worth watching.`;
+}
+function drillSalesTerms(rows){
+  document.getElementById('drill-sales').innerHTML = `<h3>Sales by payment terms</h3><div class="cw"><canvas id="c-sales"></canvas></div><div class="insight" id="i-sales"></div>`;
+  drawChart('c-sales','doughnut', rows.map(r=>r.payment_terms), [{data:rows.map(r=>r.total_sales), backgroundColor:PALETTE}]);
+  document.getElementById('i-sales').textContent = `${rows.length} distinct payment-term arrangements in force across confirmed invoices.`;
+}
+function drillSalesDelivery(rows){
+  document.getElementById('drill-sales').innerHTML = `<h3>Sales by delivery status</h3><div class="cw"><canvas id="c-sales"></canvas></div><div class="insight" id="i-sales"></div>`;
+  drawChart('c-sales','bar', rows.map(r=>r.delivery_status), [{label:'Amount', data:rows.map(r=>r.total_amount), backgroundColor:'#4caf82'}]);
+  document.getElementById('i-sales').textContent = `Tracks how much confirmed revenue sits in each fulfillment stage.`;
+}
+
+// ---------------------------------------------------------------------------
+// FINANCE
+// ---------------------------------------------------------------------------
+async function loadFinance(){
+  const grid = document.getElementById('kpi-finance');
+  const ar = await fetchView('v_ar_aging');
+  const ap = await fetchView('v_ap_aging');
+  const [net] = await fetchView('v_net_position');
+  const arTotal = ar.reduce((s,r)=>s+Number(r.total_outstanding),0);
+  const apTotal = ap.reduce((s,r)=>s+Number(r.total_outstanding),0);
+  const overdue90 = ar.find(r=>r.age_bucket==='90+ Days');
+
+  const cards = [
+    ['Total receivable (AR)', PKR(net.total_receivable), ar.reduce((s,r)=>s+r.invoices,0)+' open invoices', 'Click → AR aging', ()=>drillAging('AR aging by bucket',ar,'invoices')],
+    ['Total payable (AP)', PKR(net.total_payable), ap.reduce((s,r)=>s+r.bills,0)+' open bills', 'Click → AP aging', ()=>drillAging('AP aging by bucket',ap,'bills')],
+    ['Net position', (net.net_position>=0?'+':'')+PKR(net.net_position), net.net_position>=0?'receivable excess':'payable excess', 'Click → AR vs AP', ()=>drillNet(net)],
+    ['90+ day AR', PKR(overdue90?overdue90.total_outstanding:0), 'overdue risk', 'Click → AR aging', ()=>drillAging('AR aging by bucket',ar,'invoices')],
+  ];
+  grid.innerHTML = cards.map((c,i)=>kpiCard(c[0],c[1],c[2],c[3],i===0)).join('');
+  [...grid.children].forEach((el,i)=>el.onclick=()=>{[...grid.children].forEach(e=>e.classList.remove('sel'));el.classList.add('sel');cards[i][4]();});
+  drillAging('AR aging by bucket', ar, 'invoices');
+}
+function drillAging(title, rows, countLabel){
+  document.getElementById('drill-finance').innerHTML = `<h3>${title}</h3><div class="cw"><canvas id="c-finance"></canvas></div><div class="insight" id="i-finance"></div>`;
+  drawChart('c-finance','bar', rows.map(r=>r.age_bucket), [{label:'Outstanding', data:rows.map(r=>r.total_outstanding), backgroundColor:'#e2574c'}]);
+  document.getElementById('i-finance').textContent = `${rows.reduce((s,r)=>s+r[countLabel],0)} ${countLabel} spread across ${rows.length} aging buckets.`;
+}
+function drillNet(net){
+  document.getElementById('drill-finance').innerHTML = `<h3>AR vs AP</h3><div class="cw"><canvas id="c-finance"></canvas></div><div class="insight" id="i-finance"></div>`;
+  drawChart('c-finance','bar', ['Receivable (AR)','Payable (AP)'], [{data:[net.total_receivable, net.total_payable], backgroundColor:['#4caf82','#e2574c']}]);
+  document.getElementById('i-finance').textContent = `Net position is ${PKR(net.net_position)} — ${net.net_position>=0?'more owed to you than you owe':'you owe more than is owed to you'}.`;
+}
+
+// ---------------------------------------------------------------------------
+// PURCHASING
+// ---------------------------------------------------------------------------
+async function loadPurchasing(){
+  const grid = document.getElementById('kpi-purchasing');
+  const monthly = await fetchView('v_purchases_monthly');
+  const vendors = await fetchView('v_purchases_top_vendors');
+  const total = monthly.reduce((s,r)=>s+Number(r.total_purchases),0);
+  const bills = monthly.reduce((s,r)=>s+r.bills,0);
+
+  const cards = [
+    ['Total purchases', PKR(total), bills+' bills', 'Click → monthly trend', ()=>drillPurchTrend(monthly)],
+    ['Active vendors', NUM(vendors.length), 'in top ranking', 'Click → top vendors', ()=>drillPurchVendors(vendors)],
+    ['Avg bill value', PKR(bills?total/bills:0), 'per bill', 'Click → top vendors', ()=>drillPurchVendors(vendors)],
+  ];
+  grid.innerHTML = cards.map((c,i)=>kpiCard(c[0],c[1],c[2],c[3],i===0)).join('');
+  [...grid.children].forEach((el,i)=>el.onclick=()=>{[...grid.children].forEach(e=>e.classList.remove('sel'));el.classList.add('sel');cards[i][4]();});
+  drillPurchTrend(monthly);
+}
+function drillPurchTrend(rows){
+  document.getElementById('drill-purchasing').innerHTML = `<h3>Monthly purchase trend</h3><div class="cw"><canvas id="c-purch"></canvas></div><div class="insight" id="i-purch"></div>`;
+  drawChart('c-purch','line', rows.map(r=>r.month.slice(0,7)), [{label:'Purchases (PKR)', data:rows.map(r=>r.total_purchases), borderColor:'#5b9bd5', backgroundColor:'rgba(91,155,213,.12)', fill:true, tension:.3}]);
+  document.getElementById('i-purch').textContent = `${rows.reduce((s,r)=>s+r.bills,0)} bills processed over ${rows.length} months.`;
+}
+function drillPurchVendors(rows){
+  document.getElementById('drill-purchasing').innerHTML = `<h3>Top 10 vendors by purchase amount</h3><div class="cw"><canvas id="c-purch"></canvas></div><div class="insight" id="i-purch"></div>`;
+  drawChart('c-purch','bar', rows.map(r=>r.vendor), [{label:'Total purchases', data:rows.map(r=>r.total_purchases), backgroundColor:'#5b9bd5'}], {indexAxis:'y'});
+  document.getElementById('i-purch').textContent = `Top vendor: ${rows[0]?.vendor||'—'} at ${PKR(rows[0]?.total_purchases)}.`;
+}
+
+// ---------------------------------------------------------------------------
+// PRICING MODEL
+// ---------------------------------------------------------------------------
+async function loadPricing(){
+  const grid = document.getElementById('kpi-pricing');
+  const byRange = await fetchView('v_pricing_by_range');
+  const bySize = await fetchView('v_pricing_by_order_size');
+  const byTerms = await fetchView('v_pricing_by_terms');
+  const avgAll = byRange.reduce((s,r)=>s+Number(r.avg_price)*r.transactions,0) / byRange.reduce((s,r)=>s+r.transactions,0);
+
+  const cards = [
+    ['Avg unit price', PKR(avgAll), 'across all lines', 'Click → price distribution', ()=>drillPricing('Price dispersion by unit-price range','price_range','avg_price',byRange)],
+    ['Order-size bands', NUM(bySize.length), 'bulk discount check', 'Click → price vs quantity', ()=>drillPricing('Avg unit price by order size','order_size','avg_unit_price',bySize)],
+    ['Payment-term spread', NUM(byTerms.length), 'terms compared', 'Click → price by terms', ()=>drillPricing('Avg unit price by payment terms','payment_terms','avg_unit_price',byTerms)],
+  ];
+  grid.innerHTML = cards.map((c,i)=>kpiCard(c[0],c[1],c[2],c[3],i===0)).join('');
+  [...grid.children].forEach((el,i)=>el.onclick=()=>{[...grid.children].forEach(e=>e.classList.remove('sel'));el.classList.add('sel');cards[i][4]();});
+  drillPricing('Price dispersion by unit-price range','price_range','avg_price',byRange);
+}
+function drillPricing(title, xKey, yKey, rows){
+  document.getElementById('drill-pricing').innerHTML = `<h3>${title}</h3><div class="cw"><canvas id="c-pricing"></canvas></div><div class="insight" id="i-pricing"></div>`;
+  drawChart('c-pricing','bar', rows.map(r=>r[xKey]), [{label:'Avg price', data:rows.map(r=>r[yKey]), backgroundColor:'#e0a83f'}]);
+  document.getElementById('i-pricing').textContent = `${rows.length} segments compared — check for unexpected bulk-discount inversions.`;
+}
+
+// ---------------------------------------------------------------------------
+// INVENTORY
+// ---------------------------------------------------------------------------
+async function loadInventory(){
+  const grid = document.getElementById('kpi-inventory');
+  const byType = await fetchView('v_inventory_by_type');
+  const monthly = await fetchView('v_inventory_monthly');
+  const totalMoves = byType.reduce((s,r)=>s+r.moves,0);
+  const stockIn = monthly.reduce((s,r)=>s+Number(r.stock_in||0),0);
+  const stockOut = monthly.reduce((s,r)=>s+Number(r.stock_out||0),0);
+  const returns = monthly.reduce((s,r)=>s+Number(r.returns||0),0);
+
+  const cards = [
+    ['Total stock moves', NUM(totalMoves), 'transactions', 'Click → moves by type', ()=>drillInvType(byType)],
+    ['Stock in (purchase)', NUM(stockIn), 'units received', 'Click → monthly in/out', ()=>drillInvMonthly(monthly)],
+    ['Stock out (sale)', NUM(stockOut), 'units dispatched', 'Click → monthly in/out', ()=>drillInvMonthly(monthly)],
+    ['Sale returns', NUM(returns), 'units returned', 'Click → monthly in/out', ()=>drillInvMonthly(monthly)],
+  ];
+  grid.innerHTML = cards.map((c,i)=>kpiCard(c[0],c[1],c[2],c[3],i===0)).join('');
+  [...grid.children].forEach((el,i)=>el.onclick=()=>{[...grid.children].forEach(e=>e.classList.remove('sel'));el.classList.add('sel');cards[i][4]();});
+  drillInvType(byType);
+}
+function drillInvType(rows){
+  document.getElementById('drill-inventory').innerHTML = `<h3>Stock movement by type</h3><div class="cw"><canvas id="c-inv"></canvas></div><div class="insight" id="i-inv"></div>`;
+  drawChart('c-inv','bar', rows.map(r=>r.type), [{label:'Net quantity', data:rows.map(r=>r.net_quantity), backgroundColor:'#4caf82'}]);
+  document.getElementById('i-inv').textContent = `${rows.length} movement types tracked.`;
+}
+function drillInvMonthly(rows){
+  document.getElementById('drill-inventory').innerHTML = `<h3>Monthly stock in vs out</h3><div class="cw"><canvas id="c-inv"></canvas></div><div class="insight" id="i-inv"></div>`;
+  drawChart('c-inv','line', rows.map(r=>r.month.slice(0,7)), [
+    {label:'Stock in', data:rows.map(r=>r.stock_in), borderColor:'#4caf82', tension:.3},
+    {label:'Stock out', data:rows.map(r=>r.stock_out), borderColor:'#e2574c', tension:.3},
+    {label:'Returns', data:rows.map(r=>r.returns), borderColor:'#e0a83f', tension:.3}
+  ]);
+  document.getElementById('i-inv').textContent = `Watch months where stock-out exceeds stock-in for reorder risk.`;
+}
+
+// ---------------------------------------------------------------------------
+// COLLECTIONS
+// ---------------------------------------------------------------------------
+async function loadCollections(){
+  const grid = document.getElementById('kpi-collections');
+  const rows = await fetchView('v_collections_top_outstanding');
+  const total = rows.reduce((s,r)=>s+Number(r.outstanding),0);
+  const maxDays = Math.max(...rows.map(r=>r.max_days_overdue||0));
+
+  const cards = [
+    ['Top-10 outstanding', PKR(total), rows.length+' customers', 'Click → outstanding by customer', ()=>drillColl(rows)],
+    ['Longest overdue', maxDays+' days', 'oldest open invoice', 'Click → outstanding by customer', ()=>drillColl(rows)],
+    ['Open invoices (top 10)', NUM(rows.reduce((s,r)=>s+r.open_invoices,0)), 'unresolved', 'Click → outstanding by customer', ()=>drillColl(rows)],
+  ];
+  grid.innerHTML = cards.map((c,i)=>kpiCard(c[0],c[1],c[2],c[3],i===0)).join('');
+  [...grid.children].forEach((el,i)=>el.onclick=()=>{[...grid.children].forEach(e=>e.classList.remove('sel'));el.classList.add('sel');cards[i][4]();});
+  drillColl(rows);
+}
+function drillColl(rows){
+  document.getElementById('drill-collections').innerHTML = `<h3>Top customers with outstanding balance</h3><table class="dt"><thead><tr><th>Customer</th><th>Outstanding</th><th>Max days overdue</th><th>Open invoices</th></tr></thead><tbody>${
+    rows.map(r=>`<tr><td>${r.customer}</td><td>${PKR(r.outstanding)}</td><td>${r.max_days_overdue}</td><td>${r.open_invoices}</td></tr>`).join('')
+  }</tbody></table>`;
+}
+
+// ---------------------------------------------------------------------------
+// TABS, STATUS BADGE, REFRESH
+// ---------------------------------------------------------------------------
+const loaders = {sales:loadSales, finance:loadFinance, purchasing:loadPurchasing, pricing:loadPricing, inventory:loadInventory, collections:loadCollections};
+const loadedTabs = new Set();
+
+document.querySelectorAll('nav.tabs button').forEach(btn=>{
+  btn.onclick = async ()=>{
+    document.querySelectorAll('nav.tabs button').forEach(b=>b.classList.remove('on'));
+    btn.classList.add('on');
+    const tab = btn.dataset.tab;
+    document.querySelectorAll('.page').forEach(p=>p.classList.remove('on'));
+    document.getElementById('pg-'+tab).classList.add('on');
+    if(!loadedTabs.has(tab)) await safeLoad(tab);
+  };
+});
+
+async function safeLoad(tab){
+  const drillEl = document.getElementById('drill-'+tab);
+  try{
+    document.getElementById('kpi-'+tab).innerHTML = '<div class="loading">Loading…</div>';
+    await loaders[tab]();
+    loadedTabs.add(tab);
+  }catch(e){
+    document.getElementById('kpi-'+tab).innerHTML = '';
+    drillEl.innerHTML = `<div class="err">Couldn't load this module: ${e.message||e}. Check that bi_views_for_dashboard.sql has been run and that the anon role has SELECT on these views.</div>`;
+  }
+}
+
+async function refreshStatus(){
+  const dot = document.getElementById('statusDot'), txt = document.getElementById('statusText');
+  try{
+    const [s] = await fetchView('v_bi_status');
+    if(!s){dot.className='dot stale';txt.textContent='No refresh recorded yet';return;}
+    const ageMin = (Date.now() - new Date(s.last_refresh_at).getTime())/60000;
+    if(s.status==='Processing'){dot.className='dot stale';txt.textContent='Refreshing…';}
+    else if(ageMin < 60){dot.className='dot live';txt.textContent='Live · refreshed '+Math.round(ageMin)+'m ago';}
+    else {dot.className='dot stale';txt.textContent='Data is '+Math.round(ageMin/60)+'h old';}
+  }catch(e){
+    dot.className='dot down'; txt.textContent='Connection failed';
+  }
+}
+
+async function doRefresh(){
+  const btn = document.getElementById('refreshBtn');
+  btn.disabled = true; btn.textContent = 'Refreshing…';
+  try{
+    await sb.rpc('refresh_bi_intelligence');
+    await refreshStatus();
+    loadedTabs.clear();
+    const activeTab = document.querySelector('nav.tabs button.on').dataset.tab;
+    await safeLoad(activeTab);
+  }catch(e){
+    alert('Refresh failed: '+(e.message||e));
+  }finally{
+    btn.disabled = false; btn.textContent = '↻ Refresh data';
+  }
+}
+
+if(isConfigured){
+  refreshStatus();
+  safeLoad('sales');
+  setInterval(refreshStatus, 60000);
+}
+</script>
+</body>
+</html>
